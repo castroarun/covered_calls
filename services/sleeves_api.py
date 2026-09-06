@@ -323,7 +323,8 @@ def _book_values():
         out['openalpha'] = float(_oa_book().load_state().get('capital', 0.0) or 0.0)
     except Exception:
         out['openalpha'] = 0.0
-    # IPO is a paper book: its live money is whatever has been earmarked, not notional NAV
+    # Whether the sleeve is on paper or live, `ipo_funded` is the real money committed
+    # to it — never the paper book's notional NAV, which would inflate the whole table.
     out['ipo'] = float(_alloc().get('ipo_funded', 0.0) or 0.0)
     return out
 
@@ -398,31 +399,65 @@ def _route(amount):
 
 
 def _ipo_flow(kind):
-    """IPO is a PAPER sleeve, so its share of a deposit is earmarked, not deployed.
+    """Money in or out of the IPO sleeve — and the switch that takes it real.
 
-    The money physically stays in the liquid ETF; `ipo_funded` records how much of it is
-    spoken for, so the drift table tells the truth about the target while the sleeve is
-    still on soak. When IPO graduates to real money this endpoint is replaced by a real
-    book adapter and the earmark becomes its opening capital.
+    The sleeve runs as a PAPER book from the day its engine lands, on real prices and
+    real signals, so its trades are visible before a rupee is committed. Arun's rule
+    (06-Sep-2026): **the first real deposit through this desk arms it for real money.**
+    Paper is the state it waits in, not a state it has to be argued out of.
+
+    What arming does and does not mean, stated plainly because the difference matters:
+
+      does      flips `ipo_status` to 'live', sets the sleeve's real capital, and makes
+                every subsequent signal a real-money instruction
+      does NOT  place orders. Like Open Alpha, this book has no automated executor yet,
+                so a live IPO sleeve alerts with the exact buy or sell and Arun places
+                it. Claiming otherwise would be the dangerous kind of wrong.
+
+    Withdrawing everything does NOT put the sleeve back on paper. Going live is a
+    decision about the strategy, not about today's balance, and silently un-arming a
+    book because it briefly held no cash is exactly the sort of state change nobody
+    would notice until it mattered.
     """
     amt, dry = _params()
     if amt is None:
         return jsonify(error='amount must be a number between 1 and 1,00,00,000'), 400
     a = _alloc()
     cur = float(a.get('ipo_funded', 0.0) or 0.0)
+    live = a.get('ipo_status') == 'live'
     after = cur + amt if kind == 'deposit' else cur - amt
     if after < -1:
         return jsonify(ok=False, book='ipo', kind=kind, amount=amt, feasible=False,
-                       plan=[f'only Rs {cur:,.0f} is earmarked for IPO']), 409
-    plan = ([f'earmark Rs {amt:,.0f} for the IPO sleeve (held in the liquid ETF)',
-             'no order is placed — IPO is on paper until the soak review clears it']
-            if kind == 'deposit' else
-            [f'release Rs {amt:,.0f} of the IPO earmark back to free capital'])
+                       plan=[f'only Rs {cur:,.0f} is funded in the IPO sleeve']), 409
+
+    arming = (kind == 'deposit') and not live
+    if kind == 'deposit':
+        plan = [f'credit Rs {amt:,.0f} to the IPO sleeve '
+                f'(capital Rs {cur:,.0f} -> Rs {after:,.0f})']
+        if arming:
+            plan.append('THIS ARMS THE SLEEVE FOR REAL MONEY — it leaves paper and its '
+                        'signals become real-money instructions from the next scan')
+        plan.append('MANUAL: no executor on this book — the 15:18 checker alerts with the '
+                    'exact order and you place it, exactly as Open Alpha works today')
+    else:
+        plan = [f'pay out Rs {amt:,.0f} from the IPO sleeve']
+        if live:
+            plan.append('the sleeve stays LIVE — withdrawing does not put it back on paper')
+
     out = dict(ok=True, book='ipo', kind=kind, amount=amt, dry_run=dry, feasible=True,
-               plan=plan, earmark_after=round(max(0.0, after), 2))
+               plan=plan, capital_after=round(max(0.0, after), 2),
+               arms_live=arming, status_after=('live' if (live or arming) else 'paper'))
     if dry:
         return jsonify(out)
+
     a['ipo_funded'] = round(max(0.0, after), 2)
+    if arming:
+        a['ipo_status'] = 'live'
+        a['ipo_armed_ts'] = str(datetime.now())[:19]
+        a.setdefault('changelog', []).append(dict(
+            date=str(datetime.now())[:10],
+            text=f'IPO sleeve armed for real money by a Rs {amt:,.0f} deposit through the '
+                 f'Capital Desk. Execution stays manual-assisted until an executor exists.'))
     a.setdefault('flows', []).append(dict(ts=str(datetime.now())[:19], kind=kind,
                                           amount=amt, via='capital desk'))
     tmp = ALLOC.with_suffix('.json.tmp')
