@@ -59,7 +59,7 @@ export const STATUS_LABEL: Record<SystemStatus, string> = {
   parked: 'Parked · not trading',
 };
 
-export const REGISTER_UPDATED = '24 Aug 2026';
+export const REGISTER_UPDATED = '6 Sep 2026';
 
 export const SYSTEMS: StrategySystem[] = [
   // ------------------------------------------------------------------ LIVE
@@ -372,6 +372,38 @@ export const SYSTEMS: StrategySystem[] = [
     studies: [{ slug: 'bluesky-ath-breakout-research142', title: 'BananaPatterns Blue Sky — forensic replication + 20-year robustness' }],
     changeLog: [{ date: '4 Sep 2026', text: 'WENT REAL: Rs 4,46,348 deployed in RA6610 - top-16 by RS of the 21 triggered candidates (LIQUIDCASE 1757u sold to fund; deliberate override of the Dec-5 soak gate, Arun). Exits manual-assisted: 15:18 IST checker alerts the exact sell order; real executor build is now the priority. Paper model retired from the page, engine continues headless as reference.' }, { date: '3 Sep 2026', text: 'TRAIL 20 -> 15: the pre-declared exit no-cliff check under the new no-gate/16-slot spec showed trail-15 beats trail-20 by +1.6-2.0pp AFTER-TAX on 24-26/30 paired seeds with a better worst-seed and shallower DD (the faster trail earns its churn once gate-filtered entries are gone). Stop stays -8% (stop axis flat = noise). Book re-seeded (seed 8, 14 open).' }, { date: '3 Sep 2026', text: 'SPEC REVISION after the gate audit: SMA200 gate RETIRED (refuted by the 72-cell bake-off + 30-seed paired test; it was also silently NaN-disabled in every backtest since Apr-2026 via phantom 15-Jan-26 holiday rows, now purged). DD10 evaluated, NOT adopted (insurance premium ~1.6pp/yr). Book widened to 16 slots @6.25% - median CAGR held (~37.8%), worst-seed 33.6%, path dependence halved. Book re-seeded on the new spec; deposits carried; dividend HWM re-anchored. Soak clock restarts today.' }, { date: '2 Sep 2026', text: 'G5 paper soak started at ₹10L on the adopted taxable spec (trail-20).' }],
     note: 'Soak pass criterion (pre-registered): tracks the backtest trade distribution and fills within ~0.5% over ~a quarter; intended use is the 50-50 blend with the Momentum book.',
+  },
+  {
+    id: 'ipo-base',
+    name: 'IPO Base',
+    subtitle: 'breakouts from bases built by recently listed stocks (research/153)',
+    status: 'paper',
+    size: '\u20b910,00,000 notional \u2014 arms for real money on the first Capital Desk deposit',
+    since: '6 Sep 2026',
+    rule: 'A recently listed stock closes above the highest close of its last 25 bars, from a base no deeper than 30% \u2192 buy-stop AT the pivot next day; \u22128% close stop, +25% target, exit below the 20-SMA; 8 slots at 18.75%, no market gate.',
+    rules: [
+      ['Universe', 'NSE equities with a VETTED listing date (research/153 table, 1,353 accepted), ETFs excluded, all pre-listing rows masked'],
+      ['Age band', 'listed within 6 months AND at least 60 bars \u2014 60, not the spec\u2019s 25: the study\u2019s own harness only admitted stocks with 60+ bars, so 60 is what was validated'],
+      ['Liquidity', '20-day median traded value \u2265 \u20b95 cr at t\u22121'],
+      ['Signal', 'pivot = highest close of the last 25 bars; base depth \u2264 30%; not already extended; close > pivot'],
+      ['Entry', 'next day buy-stop AT the pivot, filled max(pivot, open) \u2014 filling at the close instead costs 14.08pp of CAGR'],
+      ['Exits', 'stop close \u2264 0.92\u00d7buy \u2192 target close \u2265 1.25\u00d7buy \u2192 close < SMA-20 (entry bar exempt)'],
+      ['Book', '8 slots at 18.75% of equity, 25 bps/side, NO market gate (it lost 30/30 seeds)'],
+      ['Tie-break', 'highest 20-day traded value first \u2014 PRE-REGISTERED, not backtested: the study drew lots across 30 seeds'],
+      ['Data guard', 'a single-day close move \u2264 \u221240% is treated as a split/bonus: position HELD and alerted, never stopped out'],
+    ],
+    rulesDoc: 'services/ipo_paper.py + research/153_ipo_base',
+    dashboard: '/ipo-paper',
+    studies: [
+      { slug: 'ipo-base-breakout-research153', title: 'IPO Base breakout \u2014 adopted spec, 680 cells', verdict: 'STRATEGY-CANDIDATE' },
+      { slug: 'ipo-idle-cash-redeployment-research155', title: 'Should the idle cash work in OA or TN?', verdict: 'CONCLUDED' },
+    ],
+    changeLog: [
+      { date: '6 Sep 2026', text: 'Paper book started on the research/153 adopted spec. Reconciled against the study engine over 34 trading days BEFORE writing state: 20/21 signals agree. The single gap (KISSHT, 21-Jul) is the study admitting a stock to that day\u2019s scan on its TOTAL bar count (84 today) rather than its count at the time (51) \u2014 a look-ahead this engine does not repeat.' },
+      { date: '6 Sep 2026', text: 'MIN_BARS set to 60, not the spec\u2019s 25. The study records min_bars 25, but its panel loader admits only symbols with n >= 60, so the published 31.03% CAGR was earned on stocks aged roughly 3-6 months. At 25 this engine found 7 genuine recent IPOs the study could never have traded (INDOMIM 27 bars, LASERPOWER 37, CORDELIA 48, TURTLEMINT 50, VAML/VEDPOWER 59). The wider band may well be better, but it is untested \u2014 that belongs in a study, not a live book.' },
+      { date: '6 Sep 2026', text: 'Arun\u2019s funding rule: the book waits on paper so its trades are visible, and the FIRST real deposit routed to it from the Capital Desk arms it for real money. Execution stays manual-assisted either way \u2014 there is no executor on this book, exactly as with Open Alpha.' },
+    ],
+    note: 'Soak pass criterion (pre-registered, research/153): modelled vs actual fill within 0.5% of the pivot and a miss rate under 15%, because the entire edge is getting filled AT the pivot. Review 15-Oct-2026. Expect long idle stretches \u2014 the sleeve is 32.7% invested on average and took no trades at all in 2013-14; research/155 tested redeploying that cash and rejected it.',
   },
   {
     id: 'breakout-paper',

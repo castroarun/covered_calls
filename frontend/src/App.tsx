@@ -38,6 +38,7 @@ import StockWings from './pages/StockWings';
 import BreakoutPaper from './pages/BreakoutPaper';
 import BlueskyPaper from './pages/BlueskyPaper';
 import CapitalDesk from './pages/CapitalDesk';
+import IpoPaper from './pages/IpoPaper';
 import HaPaper from './pages/HaPaper';
 import OrbPaper from './pages/OrbPaper';
 import OholPaper from './pages/OholPaper';
@@ -340,6 +341,16 @@ export default function App() {
           <Protected>
             <AppLayout active="bluesky-paper">
               <BlueskyPaper />
+            </AppLayout>
+          </Protected>
+        }
+      />
+      <Route
+        path="/ipo-paper"
+        element={
+          <Protected>
+            <AppLayout active="ipo-paper">
+              <IpoPaper />
             </AppLayout>
           </Protected>
         }

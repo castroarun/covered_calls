@@ -1,0 +1,41 @@
+{
+ "updated": "2026-09-06 16:44:13.494198",
+ "asof": "2026-09-04",
+ "mode": "paper",
+ "positions": [],
+ "capital": 1000000,
+ "cash": 1000000,
+ "value": 0,
+ "nav": 1000000,
+ "pnl": 0,
+ "realized": 0,
+ "gain": 0,
+ "return_pct": 0.0,
+ "invested_pct": 0.0,
+ "slots": 8,
+ "slots_used": 0,
+ "pending": [
+  {
+   "symbol": "MARSONS",
+   "pivot": 133.17,
+   "close": 137.56,
+   "depth_pct": 24.7,
+   "tv": 364840622.28,
+   "listed": "2026-03-13",
+   "age_days": 175
+  }
+ ],
+ "navcurve": [
+  {
+   "d": "2026-09-04",
+   "nav": 1000000
+  }
+ ],
+ "trades": [],
+ "data_events": [],
+ "started": "2026-09-06",
+ "log": [
+  "panel 20 names in the age band, asof 2026-09-04",
+  "1 candidates, 8 slots free, 1 buy-stops armed for tomorrow"
+ ]
+}

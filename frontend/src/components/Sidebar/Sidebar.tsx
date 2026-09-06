@@ -15,7 +15,7 @@ import Avatar from '../Avatar/Avatar';
 import { useFavourites } from '../GlobalSearch/favourites';
 
 interface Props {
-  active?: 'overview' | 'strategies' | 'orb' | 'nas' | 'nas-config' | 'scaleup' | 'straddles' | 'straddle45' | 'stock-wings' | 'nwv' | 'options-study' | 'straddle-study' | 'n500m' | 'strangle' | 'mst' | 'intraday75wr' | 'pair-trading' | 'scanner' | 'breakout-scanner' | 'ath-scanner' | 'indices' | 'backtest' | 'momentum-paper' | 'breakout-paper' | 'bluesky-paper' | 'ha-paper' | 'orb-paper' | 'ohol-paper' | 'fnoms-paper' | 'eod-breakout' | 'reports' | 'holdings' | 'options-data' | 'future-plans' | 'journal' | 'capital' | 'settings';
+  active?: 'overview' | 'strategies' | 'orb' | 'nas' | 'nas-config' | 'scaleup' | 'straddles' | 'straddle45' | 'stock-wings' | 'nwv' | 'options-study' | 'straddle-study' | 'n500m' | 'strangle' | 'mst' | 'intraday75wr' | 'pair-trading' | 'scanner' | 'breakout-scanner' | 'ath-scanner' | 'indices' | 'backtest' | 'momentum-paper' | 'breakout-paper' | 'bluesky-paper' | 'ha-paper' | 'orb-paper' | 'ohol-paper' | 'fnoms-paper' | 'eod-breakout' | 'reports' | 'holdings' | 'options-data' | 'future-plans' | 'journal' | 'capital' | 'ipo-paper' | 'settings';
   userName?: string;
   /** Phone drawer is open (ignored from 769px up). */
   mobileOpen?: boolean;
@@ -397,6 +397,13 @@ export default function Sidebar({ active, userName = 'Trader', mobileOpen, onNav
             icon={<IconBarChart />}
             label="Open Alpha"
             active={active === 'bluesky-paper'}
+            collapsed={collapsedEff}
+          />
+          <NavItem
+            to="/ipo-paper"
+            icon={<IconBarChart />}
+            label="IPO Base"
+            active={active === 'ipo-paper'}
             collapsed={collapsedEff}
           />
           <NavItem

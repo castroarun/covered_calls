@@ -111,6 +111,36 @@ GROUPS = [
 
 # Periodic reviews / re-assessments — THE calendar. status: PENDING | SCHEDULED | PARKED
 REVIEWS = [
+    ("IPO Base paper soak - fill quality against the pivot",
+     "2026-10-15", "SCHEDULED",
+     "The IPO Base book went to paper on 2026-09-06 (services/ipo_paper.py, /app/ipo-paper), "
+     "running research/153's adopted spec forward on real prices. PASS CRITERION, "
+     "pre-registered in research/153: modelled vs actual fill within 0.5% of the pivot and a "
+     "miss rate under 15%. This is the only thing the soak needs to answer, because the entire "
+     "edge is the fill - taking the signal-day close instead costs 14.08pp of CAGR and loses on "
+     "30 of 30 paired seeds. ALSO REPORT: realised selection against the 30-seed band, since "
+     "the live book breaks ties by highest 20-day traded value while the backtest drew lots "
+     "(28.82-33.44% spread). EXPECT LONG IDLE STRETCHES - the sleeve is 32.7% invested on "
+     "average and took no trades at all in 2013-14; that is the strategy working, not decay, "
+     "and research/155 already tested redeploying the cash and rejected it. The book arms for "
+     "real money on the first deposit routed to it from the Capital Desk."),
+    ("IPO Base - is the 25-bar floor in the spec actually tradeable?",
+     "2026-12-15", "PENDING",
+     "research/153's adopted spec records min_bars 25, but the study's own harness "
+     "(ipo_replay.Ctx) builds its panel with 'where n >= 60', so no stock with fewer than 60 "
+     "daily bars was EVER shown to the backtest. The published 31.03% CAGR was therefore earned "
+     "on stocks aged roughly 3-6 months, not 25 days to 6 months. Found 2026-09-06 by "
+     "reconciling services/ipo_paper.py against ipo_replay over 34 trading days: at min_bars=25 "
+     "the two agreed on only 75% of signals and EVERY disagreement was the live engine seeing a "
+     "genuine recent IPO the study could not (INDOMIM 27 bars, LASERPOWER 37, CORDELIA 48, "
+     "TURTLEMINT 50, VAML and VEDPOWER 59). The live book was set to 60 to match what was "
+     "actually validated; at 60 the engines agree on 20 of 21 signals, and the single gap "
+     "(KISSHT) is the study admitting a stock on its TOTAL bar count rather than its count at "
+     "the time - a look-ahead the live engine does not repeat. THE QUESTION: is the 25-60 bar "
+     "band tradeable? Those were real breakouts on real IPOs and the sleeve is starved of "
+     "candidates, so this is worth a proper study - rebuild Ctx with n >= 25 and re-run the "
+     "adopted spec across both bands, 30 seeds, after tax. PASS = the wider band clears the "
+     "same Calmar bar without a worse worst-seed. Until then the live book stays at 60."),
     ("research/155 - IPO sleeve idle-cash policy re-check",
      "2027-03-31", "SCHEDULED",
      "research/155 CONCLUDED: leave the IPO sleeve's idle cash in cash (5% p.a.). Arun's forward-visibility proposal was built and tested properly - 114 cells x 30 paired paths, every pull-back friction charged (25/40/60 bps both ways, tax on the realised gain with FY netting, T+1 settlement, pro-rata/LIFO/FIFO lot policy). The premise is CONFIRMED (25 bars plus a 25-day base make a 2-day-old listing ineligible for about five weeks, so the next 25 sessions are fully visible with NO look-ahead) and the mechanism WORKS (0 missed entries, about 30 pull-backs in 20 years) - but it can only touch 2.7% of the portfolio, because the sleeve is 20% of the blend, is 67.3% cash, and the candidate pool is empty on only 19.0% of days. It buys +0.105pp blend CAGR (30/30 paths) but only +0.006 Calmar (21/30) against a pre-registered bar of +0.10 on at least 26 of 30, and the advantage is gone by 40 bps and negative by 60. Continuous redeployment is worse: -0.375 Calmar on 30/30 and correlation to Open Alpha 0.21 -> 0.90. REVISIT ONLY IF (a) the IPO sleeve's blend weight exceeds 30%, or (b) the IPO pipeline has been in drought for more than 12 consecutive months. Then re-run research/155 phase 3b at the then-current weights; PASS = the gated arm clears +0.10 blend Calmar on at least 26 of 30 paired paths AND survives the 40 bps rung. Artifacts: research/155_ipo_cash_redeployment/results/{RESULTS.md, paths.csv, cost_ladder.csv, static_tilt_null.csv}. Published at /app/backtest/ipo-idle-cash-redeployment-research155."),
