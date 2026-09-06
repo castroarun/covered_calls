@@ -4,34 +4,19 @@ import styles from './MomentumPaper.module.css';
 import HoldingsCharts from '../components/HoldingsCharts/HoldingsCharts';
 import type { HoldingsRecord } from '../api/types';
 
-/* BlueSky paper book — deliberately shares the Momentum page's stylesheet and layout
-   (headline book-summary, KPI language, cards, tables) so the two sleeves read as one
-   family. Structure mirrors MomentumPaper: summary → holdings → gate/pending → curve →
-   closed trades. */
+/* OPEN ALPHA — the real-money book (/app/bluesky-paper).
 
-type Pos = {
-  symbol: string; is_cash?: boolean; qty: number; buy: number | null; entry_date: string | null; pivot: number | null;
-  day_move_pct?: number | null;
-  src?: string; ltp: number | null; value: number; pnl: number; pnl_pct: number | null;
-  days: number; stop: number; to_stop_pct: number | null; trail: number | null;
-  to_trail_pct: number | null; weight: number | null;
-};
-type Pending = { symbol: string; pivot: number; rs: number; signal_date: string };
-type Trade = {
-  symbol: string; entry_date: string; exit_date: string; buy: number; sell: number;
-  qty: number | null; net_pnl?: number | null; ret_pct: number; reason: string; src?: string;
-};
-type NavPt = { date: string; nav: number; bench: number | null };
-type Feed = {
-  updated: string; nav: number; capital: number; cash: number; invested_pct: number;
-  unrealized: number; ret_pct: number; cagr_pct: number | null; max_dd_pct: number;
-  gate_weak: boolean; gate_nb: number | null; gate_sma: number | null; gate_gap_pct: number | null;
-  positions: Pos[]; pending: Pending[]; trades: Trade[]; n_trades: number;
-  n_live_trades: number; interest_earned?: number; cash_yield_pct?: number;
-  swept_value?: number; sweep_units?: number;
-  win_pct: number | null; nav_curve: NavPt[]; spec: string;
-  provenance: string | null; study: string; log: string[];
-};
+   Shares MomentumPaper's stylesheet and section order so the three books read as one
+   family, and keeps its own loader: a raw fetch of the cron-baked static feed, which is
+   why this page renders in ~2ms while True North's API route costs ~0.7s warm (it does
+   a live Kite call plus a large pandas pivot on the request path).
+
+   Money controls are deliberately NOT here. Every deposit and withdrawal lives on the
+   Capital Desk so there is one place to look and one path to audit; this page links to
+   it and shows the resulting balances.
+
+   The retired paper model's types, EquityCurve and BookSummary were deleted on
+   06-Sep-2026 — none had been rendered since the page was rebuilt around the real book. */
 
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 const lakh = (n: number) => '₹' + (n / 100000).toFixed(2) + 'L';
@@ -46,7 +31,6 @@ const fmtD = (s: string | null | undefined) => {
 const reasonLabel: Record<string, string> = {
   stop_8pct: '−8% stop', trail_sma20: '20-SMA trail', trail_50d: '50-SMA trail',
 };
-const SEG_COLORS = ['#1f9d55', '#2f7fd1', '#d98a00', '#9057c9', '#c94f7c', '#3fa9a5', '#8a8f3d', '#b3593a'];
 const pnlTint = (p: number | null | undefined): React.CSSProperties => {
   if (p == null || !isFinite(p)) return {};
   const t = Math.min(1, Math.abs(p) / 10);
@@ -115,100 +99,35 @@ function BacktestEvidence() {
   );
 }
 
-function EquityCurve({ data }: { data: NavPt[] }) {
-  if (data.length < 2)
-    return <div className={styles.chartEmpty}>Equity curve builds as the soak runs.</div>;
-  const W = 760, H = 220, P = 8;
-  const n0 = data[0].nav;
-  const b0 = data.find((d) => d.bench != null)?.bench ?? 1;
-  const navN = data.map((d) => d.nav / n0);
-  const benN = data.map((d) => (d.bench == null ? null : d.bench / (b0 as number)));
-  const all = [...navN, ...(benN.filter((x) => x != null) as number[])];
-  const lo = Math.min(...all), hi = Math.max(...all);
-  const x = (i: number) => P + (i / (data.length - 1)) * (W - 2 * P);
-  const y = (v: number) => P + (1 - (v - lo) / (hi - lo || 1)) * (H - 2 * P);
-  const path = (arr: (number | null)[]) =>
-    arr.map((v, i) => (v == null ? '' : `${i === 0 || arr[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join(' ');
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart} preserveAspectRatio="none">
-      <path d={path(benN)} fill="none" stroke="var(--ink-muted)" strokeWidth="1.2" strokeDasharray="4 3" />
-      <path d={path(navN)} fill="none" stroke="var(--accent-pos, #1f9d55)" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function BookSummary({ f }: { f: Feed }) {
-  const realized = f.trades.reduce((a, t) => a + (t.net_pnl ?? 0), 0);
-  const stocks = f.positions.filter((p) => !p.is_cash);
-  const cashW = Math.max(0, 100 - f.invested_pct);
-  return (
-    <div className={styles.bookSummary}>
-      <div className={styles.sumMain}>
-        <div className={styles.sumLabel}>Book value</div>
-        <div className={styles.sumHero}>{inr(f.nav)}</div>
-        <div className={styles.sumSub}>
-          CAGR {pct(f.cagr_pct)} (incl. backfill) · max drawdown {pct(f.max_dd_pct)} ·
-          updated {fmtD(f.updated)}{' '}
-          <button style={{ marginLeft: 10, padding: '3px 10px', borderRadius: 6, fontSize: 12,
-                           border: '1px solid var(--hairline, #888)', cursor: 'pointer',
-                           background: 'var(--surface, transparent)', color: 'inherit' }}
-            onClick={() => fetch('/api/sleeves/openalpha/run', { method: 'POST', credentials: 'include' })
-              .then((r) => r.json()).then((d) => alert(d.mode || 'started'))
-              .catch(() => alert('run API not loaded yet (arrives with the next service reload)'))}
-            title="Initiate the engine: full nightly cycle after 17:50 IST, display refresh during market hours">
-            Run cycle now</button>
-        </div>
-        <div className={styles.barWrap}>
-          <div className={styles.barSeg}
-               style={{ width: `${f.invested_pct}%`, background: 'var(--accent-pos, #1f9d55)' }}
-               title={`stocks ${f.invested_pct}%`} />
-          <div className={styles.barSeg}
-               style={{ width: `${cashW}%`, background: 'var(--ink-faint, #b7b7b0)' }}
-               title={`cash ${cashW.toFixed(0)}%`} />
-        </div>
-        <div className={styles.legend}>
-          <span className={styles.legendItem}>
-            <span className={styles.swatch} style={{ background: 'var(--accent-pos, #1f9d55)' }} />
-            stocks ({stocks.length}) <span className={styles.legendPct}>{f.invested_pct}%</span>
-          </span>
-          <span className={styles.legendItem}>
-            <span className={styles.swatch} style={{ background: 'var(--ink-faint, #b7b7b0)' }} />
-            CASHIETF sweep + cash <span className={styles.legendPct}>{cashW.toFixed(0)}%</span>
-          </span>
-        </div>
-        <div className={styles.sumStatus}>
-          <span>{stocks.length}/8 slots held</span>
-          <span>{f.pending.length} pending buy-stops</span>
-          <span>{f.n_trades} closed · {f.win_pct == null ? '—' : f.win_pct + '% win'}</span>
-          <span>live trades: {f.n_live_trades}</span>
-        </div>
-      </div>
-      <div className={styles.sumPnl}>
-        <div className={styles.sumLabel}>P&L</div>
-        <div className={styles.pnlRow}><span>Unrealised (open)</span>
-          <b className={f.unrealized >= 0 ? styles.pos : styles.neg}>
-            {f.unrealized >= 0 ? '+' : ''}{inr(f.unrealized)}</b></div>
-        <div className={styles.pnlRow}><span>Realised (closed, net)</span>
-          <b className={realized >= 0 ? styles.pos : styles.neg}>
-            {realized >= 0 ? '+' : ''}{inr(realized)}</b></div>
-        <div className={styles.pnlRow}><span>Sweep interest earned</span>
-          <b className={styles.pos}>+{inr(f.interest_earned ?? 0)}</b></div>
-        <div className={styles.pnlRow}><span>Cash (in liquid sweep)</span><b>{lakh(f.cash)}</b></div>
-        <div className={`${styles.pnlRow} ${styles.pnlTotal}`}><span>NAV</span><b>{inr(f.nav)}</b></div>
-      </div>
-    </div>
-  );
-}
-
 type RealPos = {
   symbol: string; qty: number; buy: number; entry_date: string; stop: number; src: string;
   ltp: number | null; days: number; weight: number; day_move_pct: number | null;
   value: number; pnl: number; pnl_pct: number | null; trail: number | null;
   to_stop_pct: number | null; to_trail_pct: number | null;
 };
+type RealTrade = { symbol?: string; qty?: number; buy?: number; sell?: number;
+  entry_date?: string; exit_date?: string; net_pnl?: number; pnl_pct?: number; reason?: string };
 type RealFeed = { updated: string; positions: RealPos[]; invested: number; value: number;
   cash: number; nav: number; pnl: number; realized: number; pnl_pct: number;
-  inception: string; navcurve: { d: string; nav: number }[]; note: string; trades: any[] };
+  inception: string; navcurve: { d: string; nav: number }[]; note: string;
+  trades: RealTrade[];
+  /* Added with the capital ledger (05-Sep-2026). Optional because a feed baked by the
+     previous build is still valid until the next cron mark — the page must not blank
+     out in between, so every read falls back. */
+  capital?: number; gain?: number; return_pct?: number; stale?: boolean;
+  flows?: { ts: string; kind: string; amount: number; via?: string }[] };
+
+/* CAGR and the worst drawdown, from the book's own nav curve. Returns nulls rather than
+   zeros while the curve is too short to mean anything — the book is days old, and a
+   confident "0.0%" would read as a measurement rather than an absence. */
+function curveStats(nc: { d: string; nav: number }[]) {
+  if (!nc || nc.length < 20) return { cagr: null as number | null, dd: null as number | null };
+  const yrs = (Date.parse(nc[nc.length - 1].d) - Date.parse(nc[0].d)) / 3.15576e10;
+  const cagr = yrs > 0.08 ? (Math.pow(nc[nc.length - 1].nav / nc[0].nav, 1 / yrs) - 1) * 100 : null;
+  let peak = nc[0].nav, dd = 0;
+  for (const x of nc) { peak = Math.max(peak, x.nav); dd = Math.min(dd, x.nav / peak - 1); }
+  return { cagr, dd: dd * 100 };
+}
 
 function CurveCard({ nc }: { nc: { d: string; nav: number }[] }) {
   if (!nc || nc.length < 2)
@@ -251,7 +170,14 @@ export default function BlueskyPaper() {
     return <div className={styles.root}><div className={styles.loading}>Real-book feed unavailable ({err}).</div></div>;
   if (!r) return <div className={styles.root}><div className={styles.loading}>Loading book…</div></div>;
 
-  const gain = r.pnl + r.realized;
+  /* Gain is measured against CONTRIBUTED CAPITAL, not against the cost of today's
+     positions. Before the capital ledger the page divided by `invested`, which is only
+     right while capital never moves — and it is about to start moving. */
+  const capital = r.capital ?? r.invested;
+  const gain = r.gain ?? (r.pnl + r.realized);
+  const retPct = r.return_pct ?? (capital ? (gain / capital) * 100 : 0);
+  const cs = curveStats(r.navcurve);
+  const deployedPct = (r.value / (r.nav || 1)) * 100;
   const tone = (v: number) => (v > 0 ? 'var(--accent-pos,#0F6E56)' : v < 0 ? 'var(--accent-neg,#A32D2D)' : 'var(--ink,#1B1B1A)');
   const segs = [
     { k: 'Stocks', v: r.value, c: '#2563EB' },
@@ -261,6 +187,8 @@ export default function BlueskyPaper() {
   const pnlRows = [
     { k: 'Unrealised', v: r.pnl, hint: 'open positions vs actual fills' },
     { k: 'Realised (net)', v: r.realized, hint: 'closed trades, after costs' },
+    { k: 'Costs & fees', v: gain - (r.pnl + r.realized),
+      hint: 'the residual between the book gain and the two lines above' },
   ];
 
   return (
@@ -268,7 +196,18 @@ export default function BlueskyPaper() {
       <BacktestEvidence />
       <div className={styles.headerRow}>
         <div>
-          <h1 className={styles.title}>Open Alpha — REAL Book</h1>
+          <h1 className={styles.title}>
+            Open Alpha — REAL Book
+            <span className={`${styles.gateBadge} ${styles.on}`} style={{ marginLeft: 10 }}>
+              <i className={styles.dot} />LIVE · real money
+            </span>
+            {r.stale && (
+              <span className={styles.gateBadge} style={{ marginLeft: 8 }}
+                    title="the feed was rebuilt from state without live quotes">
+                prices as of last mark
+              </span>
+            )}
+          </h1>
           <p className={styles.sub}>
             <b>LIVE MONEY (RA6610)</b> · ATH-close breakouts, top-16 by RS of 04-Sep&apos;s 21 candidates ·
             −8% close stop · 15-SMA close trail (entry-day exempt) · exits manual-assisted:
@@ -277,16 +216,24 @@ export default function BlueskyPaper() {
         </div>
       </div>
 
+      <div className={styles.studyBar}>
+        <span className={styles.studyBarLabel}>Money in and out</span>
+        <a className={styles.studyLink} href="/app/capital">Capital Desk →</a>
+        <a className={styles.studyLink} href="/app/strategies#bluesky-paper">Register</a>
+      </div>
+
       <div className={styles.bookSummary}>
         <div className={styles.sumMain}>
           <div className={styles.sumLabel}>Current value</div>
           <div className={styles.sumHero}>{inr(r.nav)}</div>
           <div className={styles.sumSub}>
-            on <b>{inr(r.invested)}</b> invested{' '}
+            on <b>{inr(capital)}</b> of capital{' '}
             <span style={{ color: tone(gain), fontWeight: 700 }}>
-              {gain >= 0 ? '+' : '−'}{inr(Math.abs(gain))} · {pct(r.pnl_pct)}
+              {gain >= 0 ? '+' : '−'}{inr(Math.abs(gain))} · {pct(retPct)}
             </span>
             {' '}· since {r.inception}
+            {cs.cagr != null && <> · CAGR <b>{cs.cagr.toFixed(1)}%</b></>}
+            {cs.dd != null && <> · worst drawdown <b>{cs.dd.toFixed(1)}%</b></>}
           </div>
           <div className={styles.sumSub}>updated {fmtD(r.updated)} {r.updated?.slice(11, 16)} IST
             · marks every 10 min market hours</div>
@@ -311,6 +258,7 @@ export default function BlueskyPaper() {
             <span><b>{((r.value / (r.nav || 1)) * 100).toFixed(0)}%</b> deployed</span>
             <span>no market gate</span>
             <span>exit check <b>15:18</b> IST daily</span>
+            <span>manual-assisted exits</span>
           </div>
         </div>
         <div className={styles.sumPnl}>
@@ -323,7 +271,7 @@ export default function BlueskyPaper() {
           ))}
           <div className={`${styles.pnlRow} ${styles.pnlTotal}`}>
             <span>Total return</span>
-            <b style={{ color: tone(gain) }}>{gain >= 0 ? '+' : '−'}{inr(Math.abs(gain))} · {pct(r.pnl_pct)}</b>
+            <b style={{ color: tone(gain) }}>{gain >= 0 ? '+' : '−'}{inr(Math.abs(gain))} · {pct(retPct)}</b>
           </div>
         </div>
       </div>
@@ -379,6 +327,38 @@ export default function BlueskyPaper() {
         </div>
       </div>
 
+      <div className={styles.card}>
+        <div className={styles.cardTitle}>Cash &amp; capital</div>
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+          {[
+            { k: 'Contributed capital', v: inr(capital), hint: 'every rupee paid in, less anything taken out' },
+            { k: 'Idle cash', v: inr(r.cash), hint: 'credited but not yet in a position',
+              warn: r.cash > capital * 0.1 },
+            { k: 'Deployed', v: deployedPct.toFixed(0) + '%', hint: 'positions as a share of book value' },
+            { k: 'Slots used', v: `${r.positions.length} / 16`, hint: '16 slots at 6.25% of NAV each' },
+          ].map((x) => (
+            <div key={x.k} title={x.hint}>
+              <div className={styles.muted} style={{ fontSize: 11.5 }}>{x.k}</div>
+              <div style={{ fontSize: 19, fontWeight: 700,
+                            color: x.warn ? 'var(--accent-warn,#B45309)' : undefined }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+        {r.cash > 1000 && (
+          <p className={styles.note}>
+            Idle cash sits undeployed until you buy — this book has no automated executor, so a
+            deposit is recorded and alerted, never placed. Deploy it from the{' '}
+            <a href="/app/capital">Capital Desk</a>.
+          </p>
+        )}
+        {(r.flows ?? []).length > 0 && (
+          <p className={styles.note}>
+            Flows: {(r.flows ?? []).slice(-5).map((f) =>
+              `${f.kind} ${inr(f.amount)} (${String(f.ts).slice(0, 10)})`).join(' · ')}
+          </p>
+        )}
+      </div>
+
       <CurveCard nc={r.navcurve} />
 
       {r.positions.length > 0 && (
@@ -413,12 +393,69 @@ export default function BlueskyPaper() {
         <div className={styles.cardTitle}>Closed trades</div>
         {(!r.trades || r.trades.length === 0)
           ? <p className={styles.note}>None yet — exits land here when the 15:18 checker fires and a sell executes.</p>
-          : <p className={styles.note}>{r.trades.length} closed.</p>}
+          : (
+            <table className={styles.table}>
+              <thead><tr>
+                <th>Stock</th><th>Entry</th><th>Exit</th><th>Qty</th>
+                <th>Buy ₹</th><th>Sell ₹</th><th>P&amp;L ₹</th><th>P&amp;L %</th><th>Why</th>
+              </tr></thead>
+              <tbody>
+                {r.trades.map((tr, i) => (
+                  <tr key={i}>
+                    <td className={styles.sym}>{tr.symbol ?? '—'}</td>
+                    <td className={styles.muted}>{tr.entry_date ? fmtD(tr.entry_date) : '—'}</td>
+                    <td className={styles.muted}>{tr.exit_date ? fmtD(tr.exit_date) : '—'}</td>
+                    <td>{tr.qty ?? '—'}</td>
+                    <td>{tr.buy ?? '—'}</td><td>{tr.sell ?? '—'}</td>
+                    <td className={(tr.net_pnl ?? 0) >= 0 ? styles.pos : styles.neg}>
+                      {(tr.net_pnl ?? 0) >= 0 ? '+' : ''}{inr(tr.net_pnl ?? 0)}</td>
+                    <td className={(tr.pnl_pct ?? 0) >= 0 ? styles.pos : styles.neg}>{pct(tr.pnl_pct ?? null)}</td>
+                    <td className={styles.reason}>{tr.reason ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '2px solid var(--hairline,rgba(0,0,0,0.14))', fontWeight: 700 }}>
+                  <td>TOTAL ({r.trades.length})</td><td colSpan={5} />
+                  <td className={r.realized >= 0 ? styles.pos : styles.neg}>
+                    {r.realized >= 0 ? '+' : ''}{inr(r.realized)}</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          )}
         <p className={styles.note}>{r.note}</p>
         <p className={styles.note}>
-          Paper model retired from this page (Arun, 04-Sep-2026); its engine runs headless as the
-          reference model until Sleeves/dividends are rewired to this book.
+          Paper model retired from this page (Arun, 04-Sep-2026); its engine still runs headless as
+          the reference model. The Capital Desk and the dividend engine were rewired onto THIS book
+          on 05-Sep-2026 — before that they were both operating on the paper book's balances.
           Study: <a href="/app/backtest/bluesky-ath-breakout-research142">bluesky-ath-breakout-research142</a>.
+        </p>
+      </div>
+
+      <div className={styles.card}>
+        <div className={styles.cardTitle}>How it works</div>
+        <table className={`${styles.table} ${styles.rulesTable}`}>
+          <tbody>
+            {[
+              ['Universe', 'NSE equities clearing a Rs 5 cr 20-day median traded value floor; ETFs excluded'],
+              ['Entry', 'close at an all-time high, relative strength >= 70, bought the next day'],
+              ['Sizing', '16 slots at 6.25% of NAV each — equal weight, no pyramiding'],
+              ['Hard stop', 'close 8% below the fill'],
+              ['Trail', 'close below the 15-day SMA (the entry day is exempt)'],
+              ['Market gate', 'none — the gate was retired in r/142; per-stock stops carry the risk'],
+              ['Exit check', '15:18 IST daily, on a close proxy. ALERT-ONLY: no automated selling'],
+              ['Costs', '25 bps per side, and 20% STCG on gains held under a year'],
+            ].map(([k, v]) => (
+              <tr key={k}><td className={styles.sym}>{k}</td><td className={styles.muted}>{v}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        <p className={styles.note}>
+          Liveness and day-by-day history are not shown here yet: both components read
+          registries keyed to SQLite books, and this one keeps JSON state. With no closed
+          trades so far they would render empty, so the plumbing waits until there is
+          something to put in them.
         </p>
       </div>
     </div>

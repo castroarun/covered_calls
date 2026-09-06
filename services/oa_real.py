@@ -347,6 +347,70 @@ def mark():
           f"cash Rs {cash:,.0f} nav Rs {nav:,.0f}")
 
 
+def ui_only():
+    """Rebuild static/app/oa_real.json from state WITHOUT calling Kite.
+
+    `mark()` needs live quotes, and the Kite token is only refreshed by the weekday
+    auto-login cron — so between a Friday close and a Monday morning there is no way to
+    regenerate the feed at all. That matters whenever the state schema changes: the page
+    would keep serving the old shape until the next trading day, which is precisely when
+    someone is looking at it after a deploy.
+
+    This reuses the last known prices from the existing UI file (falling back to entry
+    price), recomputes every derived field from CURRENT state, and marks the payload
+    `stale` with the timestamp those prices came from, so the page can say so rather than
+    quietly presenting Friday's marks as today's.
+    """
+    st = load_state()
+    prev = {}
+    prev_updated = None
+    if UI.exists():
+        try:
+            old = json.load(open(UI))
+            prev = {r['symbol']: r for r in old.get('positions', [])}
+            prev_updated = old.get('updated')
+        except Exception:
+            pass
+    rows, tot_val, tot_pnl = [], 0.0, 0.0
+    for pos in st['positions']:
+        o = prev.get(pos['symbol'], {})
+        lp = o.get('ltp') or pos['buy']
+        val = pos['qty'] * lp
+        pnl = pos['qty'] * (lp - pos['buy'])
+        tot_val += val
+        tot_pnl += pnl
+        days_held = (date.today() - date.fromisoformat(pos['entry_date'])).days
+        rows.append(dict(**pos, ltp=lp, days=days_held,
+                         day_move_pct=o.get('day_move_pct'),
+                         value=round(val), pnl=round(pnl),
+                         pnl_pct=round((lp / pos['buy'] - 1) * 100, 2),
+                         trail=o.get('trail'),
+                         to_stop_pct=round((lp / pos['stop'] - 1) * 100, 1),
+                         to_trail_pct=o.get('to_trail_pct')))
+    cash = float(st.get('cash', 0.0))
+    capital = float(st.get('capital', 0.0))
+    cost = _cost(st)
+    nav = tot_val + cash
+    for r in rows:
+        r['weight'] = round(100 * r['value'] / nav, 1) if nav else 0
+    realized = sum(t.get('net_pnl', 0) for t in st.get('trades', []))
+    gain = nav + realized - capital
+    ui = dict(updated=prev_updated or str(datetime.now()), stale=True,
+              positions=rows, invested=round(cost), capital=round(capital),
+              value=round(tot_val), cash=round(cash), nav=round(nav),
+              pnl=round(tot_pnl), realized=round(realized), gain=round(gain),
+              pnl_pct=round(100 * tot_pnl / cost, 2) if cost else 0,
+              return_pct=round(100 * gain / capital, 2) if capital else 0,
+              inception='04-Sep-2026', navcurve=st.get('navcurve', []),
+              flows=st.get('fund_flows', [])[-20:],
+              note=st['note'], trades=st.get('trades', []))
+    tmp = UI.with_suffix('.json.tmp')
+    json.dump(ui, open(tmp, 'w'), indent=1, default=str)
+    os.replace(tmp, UI)
+    print(f'ui-only rebuild: {len(rows)} positions, nav Rs {nav:,.0f}, '
+          f'prices as of {prev_updated or "entry"}')
+
+
 def check():
     """15:18 close-proxy rule check. Alert-only."""
     kite = _kite()
@@ -376,4 +440,5 @@ def check():
 
 
 if __name__ == '__main__':
-    {'seed': seed, 'mark': mark, 'check': check}[sys.argv[1] if len(sys.argv) > 1 else 'mark']()
+    _modes = {'seed': seed, 'mark': mark, 'check': check, 'ui-only': ui_only}
+    _modes[sys.argv[1] if len(sys.argv) > 1 else 'mark']()
