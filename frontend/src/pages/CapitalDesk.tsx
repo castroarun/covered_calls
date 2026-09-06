@@ -2,9 +2,18 @@ import { useEffect, useState } from 'react';
 import { apiGet } from '../api/client';
 import styles from './BlueskyPaper.module.css';
 
-/* Combined sleeves view: Momentum (live/paper) + BlueSky (paper) + the 50-50
-   monthly-rebalanced blend, all rebased to 100 at the common start. Read-only
-   projection over the two books' own feeds — touches no trading logic. */
+/* CAPITAL DESK (/app/capital) — the one page that owns every rupee in and out.
+   Renamed from "Sleeves 50-50" on 05-Sep-2026: the book is three systems on a
+   TN 40 / OA 40 / IPO 20 target, so a name describing a two-way even split had
+   stopped being true.
+
+   It carries the target allocation and its drift, the deposit router, deposits and
+   withdrawals for every book, the dividend policy, and the comparison of the sleeves
+   over their common history. Money controls live HERE and not on the book pages, so
+   there is exactly one place to look and one path to audit.
+
+   Every flow dispatches to the book's own hardened implementation; this page derives
+   no split of its own and touches no trading logic. */
 
 type MomNav = { d: string; nav: number; bench: number | null };
 type MomState = { navcurve: MomNav[]; nav: number; capital: number; total_return_pct: number;
@@ -87,114 +96,224 @@ function MultiCurve({ dates, lines }: { dates: string[]; lines: { name: string; 
   );
 }
 
-type FlowsStatus = {
-  open_alpha: { nav: number | null; cash: number | null; liquid: number;
-    capital: number | null; sweep: { units: number; cost: number } | null;
-    flows: { ts: string; kind: string; amount: number }[] };
-  note: string;
+type Flow = { ts: string; kind: string; amount: number; via?: string };
+type BookStatus = { name: string; kind?: string; capital?: number | null; cash?: number | null;
+  liquid?: number | null; nav?: number | null; positions?: number;
+  flows?: Flow[]; error?: string; note?: string };
+type AllocRow = { book: string; value: number; target_pct: number; current_pct: number;
+  target_value: number; gap: number };
+type Allocation = { total: number; base: string; ipo_status: string; rows: AllocRow[];
+  changelog: { date: string; text: string }[] };
+type FlowsStatus = { books: Record<string, BookStatus>; allocation: Allocation; note: string };
+type RouteLeg = { book: string; amount: number };
+type RoutePlan = { amount: number; legs: RouteLeg[]; notes: string[] };
+
+const BOOK_LABEL: Record<string, string> = {
+  truenorth: 'True North', openalpha: 'Open Alpha', ipo: 'IPO base',
 };
+
+function AllocationPanel({ a }: { a: Allocation }) {
+  return (
+    <div className={styles.card}>
+      <div className={styles.cardTitle}>
+        Target allocation — {a.rows.map((r) => `${BOOK_LABEL[r.book] ?? r.book} ${r.target_pct}`).join(' / ')}
+      </div>
+      <div className={styles.sub} style={{ marginBottom: 10 }}>
+        {BOOK_LABEL[a.base] ?? a.base} is the base: it is never sold to rebalance. Arriving cash
+        goes to whichever book is furthest below its share.
+        {a.ipo_status === 'paper' && ' IPO is on paper, so its share is earmarked in the liquid ETF.'}
+      </div>
+      <table className={styles.tbl}>
+        <thead>
+          <tr><th className={styles.txt}>Book</th><th>Value</th><th>Now</th>
+            <th>Target</th><th>Target ₹</th><th>Gap</th></tr>
+        </thead>
+        <tbody>
+          {a.rows.map((r) => (
+            <tr key={r.book}>
+              <td className={styles.txt}>{BOOK_LABEL[r.book] ?? r.book}</td>
+              <td>{rup(r.value)}</td>
+              <td>{r.current_pct}%</td>
+              <td className={styles.muted}>{r.target_pct}%</td>
+              <td className={styles.muted}>{rup(r.target_value)}</td>
+              <td className={r.gap >= 0 ? styles.pos : styles.neg}>
+                {r.gap >= 0 ? '+' : '−'}{rup(Math.abs(r.gap)).slice(1)}
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td className={styles.txt}><b>Total</b></td>
+            <td><b>{rup(a.total)}</b></td>
+            <td colSpan={4} className={styles.muted}>
+              a positive gap is money the book still needs
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AllocationDesk() {
+  const [a, setA] = useState<Allocation | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    apiGet<Allocation>('/api/sleeves/allocation').then(setA)
+      .catch((e) => setErr(String(e)));
+  }, []);
+  if (err) return (
+    <div className={styles.card}>
+      <div className={styles.cardTitle}>Target allocation</div>
+      <p className={styles.note}>unavailable: {err}</p>
+    </div>
+  );
+  if (!a) return null;
+  return <AllocationPanel a={a} />;
+}
 
 function FundsPanel() {
   const [st, setSt] = useState<FlowsStatus | null>(null);
   const [amt, setAmt] = useState('');
   const [kind, setKind] = useState<'deposit' | 'withdraw'>('deposit');
-  const [target, setTarget] = useState<'both' | 'truenorth' | 'openalpha'>('both');
+  const [target, setTarget] = useState<'auto' | 'truenorth' | 'openalpha' | 'ipo'>('auto');
+  const [route, setRoute] = useState<RoutePlan | null>(null);
   const [plans, setPlans] = useState<any[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const load = () => apiGet<FlowsStatus>('/api/sleeves/status').then(setSt)
-    .catch(() => setMsg('Open Alpha funds API arrives with the 15:40 IST service reload (deferred-restart armed) — True North legs work now.'));
+    .catch((e) => setMsg('status unavailable: ' + String(e)));
   useEffect(() => { load(); }, []);
-
-  const legs = (): { name: string; url: string; body: any }[] => {
-    const n = Number(amt);
-    const half = Math.round(n / 2);
-    const tn = (a: number) => ({
-      name: 'True North', url: `/api/sleeves/truenorth/${kind}`, body: { amount: a },
-    });
-    const oa = (a: number) => ({
-      name: 'Open Alpha', url: `/api/sleeves/openalpha/${kind}`, body: { amount: a },
-    });
-    if (target === 'both') return [tn(half), oa(n - half)];
-    return target === 'truenorth' ? [tn(n)] : [oa(n)];
-  };
 
   const call = (url: string, body: any) =>
     fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
                  body: JSON.stringify(body), credentials: 'include' })
       .then(async (r) => ({ ok: r.ok, data: await r.json().catch(() => ({})) }));
 
+  /* Legs come from the SERVER's router when target is auto, so the split that is
+     previewed is the split that executes — the page never re-derives it. */
+  const buildLegs = async (n: number): Promise<RouteLeg[]> => {
+    if (target !== 'auto') return [{ book: target, amount: n }];
+    const r = await call('/api/sleeves/allocation/route', { amount: n });
+    if (!r.ok) throw new Error(r.data?.error || 'router failed');
+    setRoute(r.data as RoutePlan);
+    return (r.data as RoutePlan).legs;
+  };
+
   const preview = async () => {
     const n = Number(amt);
     if (!n || n <= 0) { setMsg('enter a positive amount'); return; }
-    setBusy(true); setMsg(null);
-    const out = [];
-    for (const l of legs()) {
-      const r = await call(l.url, { ...l.body, dry_run: true }).catch((e) => ({ ok: false, data: { error: String(e) } }));
-      out.push({ leg: l.name, amount: l.body.amount, ...r });
-    }
-    setPlans(out); setBusy(false);
+    setBusy(true); setMsg(null); setPlans(null); setRoute(null);
+    try {
+      const legs = await buildLegs(n);
+      const out = [];
+      for (const l of legs) {
+        const r = await call('/api/sleeves/' + l.book + '/' + kind,
+                             { amount: Math.round(l.amount), dry_run: true });
+        out.push({ book: l.book, amount: l.amount, ...r });
+      }
+      setPlans(out);
+    } catch (e) { setMsg(String(e)); }
+    setBusy(false);
   };
 
+  /* Multi-leg safety. Previously two legs fired sequentially under a single confirm, so
+     a failure on the second left the first applied with no record and no reversal. Now
+     every leg must pass its own dry run BEFORE anything executes, and if a leg still
+     fails mid-flight we stop immediately and report exactly what was applied and what
+     was not. The books are separate stores, so true atomicity is not available —
+     pretending otherwise would be worse than saying so plainly. */
   const execute = async () => {
-    const n = Number(amt);
-    const warn = target !== 'openalpha'
-      ? 'True North is a LIVE book — its leg follows its own flow and may place REAL orders. '
-      : '';
-    if (!window.confirm(`${warn}${kind} ₹${n.toLocaleString('en-IN')} to ${target === 'both' ? 'both sleeves 50-50' : target}?`)) return;
-    setBusy(true);
-    const out = [];
-    for (const l of legs()) {
-      const r = await call(l.url, { ...l.body, dry_run: false }).catch((e) => ({ ok: false, data: { error: String(e) } }));
-      out.push(`${l.name}: ${r.ok ? 'done' : (r.data.error || 'failed')}`);
+    if (!plans || !plans.length) return;
+    const bad = plans.filter((p) => !p.ok || p.data?.feasible === false);
+    if (bad.length) {
+      setMsg('cannot execute — ' + bad.map((b) => BOOK_LABEL[b.book] ?? b.book).join(', ')
+             + ' failed the dry run. Nothing was sent.');
+      return;
     }
-    setMsg(out.join(' · ')); setPlans(null); setAmt(''); setBusy(false); load();
+    const n = Number(amt);
+    const live = plans.some((p) => p.book === 'truenorth');
+    const warn = live ? 'True North is a LIVE book and its leg may place REAL orders.\n\n' : '';
+    const lines = plans.map((p) => '  ' + (BOOK_LABEL[p.book] ?? p.book) + ': Rs '
+      + Math.round(p.amount).toLocaleString('en-IN')).join('\n');
+    if (!window.confirm(warn + kind + ' Rs ' + n.toLocaleString('en-IN')
+        + ' split as:\n' + lines + '\n\nProceed?')) return;
+    setBusy(true);
+    const applied: string[] = [], skipped: string[] = [];
+    let halted = false;
+    for (const p of plans) {
+      const label = BOOK_LABEL[p.book] ?? p.book;
+      if (halted) { skipped.push(label); continue; }
+      const r = await call('/api/sleeves/' + p.book + '/' + kind,
+                           { amount: Math.round(p.amount), dry_run: false })
+        .catch((e) => ({ ok: false, data: { error: String(e) } }));
+      if (r.ok) applied.push(label + ' ' + rup(p.amount));
+      else { halted = true; skipped.push(label + ' FAILED: ' + (r.data?.error || 'error')); }
+    }
+    setMsg(halted
+      ? 'PARTIAL — applied: ' + (applied.join(', ') || 'nothing') + ' · NOT applied: '
+        + skipped.join(', ') + '. Reverse the applied legs manually to undo the whole flow.'
+      : 'Done — ' + applied.join(' · '));
+    setPlans(null); setRoute(null); setAmt(''); setBusy(false); load();
   };
 
-  const oa = st?.open_alpha;
+  const books = st?.books ?? {};
   const sel: React.CSSProperties = { padding: '7px 10px', borderRadius: 6,
-    border: '1px solid var(--hairline, #ccc)', background: 'var(--surface)', color: 'var(--ink)', fontSize: 13 };
+    border: '1px solid var(--hairline, #ccc)', background: 'var(--surface)',
+    color: 'var(--ink)', fontSize: 13 };
   return (
     <div className={styles.card}>
-      <div className={styles.cardTitle}>Funds — unified deployment (default: both sleeves 50-50)</div>
-      {oa && (
-        <div className={styles.sub} style={{ marginBottom: 10 }}>
-          Open Alpha liquid (cash + CASHIETF): <b>₹{Math.round(oa.liquid).toLocaleString('en-IN')}</b> ·
-          capital contributed ₹{Math.round(oa.capital ?? 0).toLocaleString('en-IN')} ·
-          Open Alpha withdrawals never force-sell · True North legs run through its own hardened flow
-        </div>
-      )}
+      <div className={styles.cardTitle}>Funds — every rupee in and out</div>
+      <div className={styles.sub} style={{ marginBottom: 10 }}>
+        {Object.entries(books).filter(([k]) => k !== 'openalpha_model').map(([k, b]) => (
+          <span key={k} style={{ marginRight: 14 }}>
+            <b>{b.name}</b>{' '}
+            {b.error ? <span className={styles.neg}>unavailable</span>
+              : <>capital {rup(b.capital)} · liquid {rup(b.liquid ?? b.cash)}</>}
+          </span>
+        ))}
+      </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={kind} onChange={(e) => setKind(e.target.value as any)} style={sel}>
+        <select value={kind} onChange={(e) => { setKind(e.target.value as any); setPlans(null); }} style={sel}>
           <option value="deposit">Deposit</option>
           <option value="withdraw">Withdraw</option>
         </select>
-        <select value={target} onChange={(e) => setTarget(e.target.value as any)} style={sel}>
-          <option value="both">Both sleeves 50-50</option>
+        <select value={target} onChange={(e) => { setTarget(e.target.value as any); setPlans(null); }} style={sel}>
+          <option value="auto">Route to target (40/40/20)</option>
           <option value="truenorth">True North only</option>
           <option value="openalpha">Open Alpha only</option>
+          <option value="ipo">IPO base only</option>
         </select>
-        <input value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="amount ₹" style={{ ...sel, width: 130 }} />
+        <input value={amt} onChange={(e) => { setAmt(e.target.value); setPlans(null); }}
+               placeholder="amount Rs" style={{ ...sel, width: 130 }} />
         <button style={{ ...sel, cursor: 'pointer', fontWeight: 600 }} disabled={busy} onClick={preview}>Preview</button>
         {plans && <button style={{ ...sel, cursor: 'pointer', fontWeight: 700 }} disabled={busy} onClick={execute}>Confirm &amp; execute</button>}
       </div>
+      {route && route.notes.map((n, i) => (
+        <p key={i} className={styles.note} style={{ marginBottom: 2 }}>{n}</p>
+      ))}
       {plans && plans.map((pl, i) => (
         <p key={i} className={styles.note}>
-          <b>{pl.leg} — ₹{Number(pl.amount).toLocaleString('en-IN')}:</b>{' '}
+          <b>{BOOK_LABEL[pl.book] ?? pl.book} — {rup(pl.amount)}:</b>{' '}
           {pl.ok
-            ? (Array.isArray(pl.data.plan) ? pl.data.plan.join(' → ') : JSON.stringify(pl.data).slice(0, 220))
+            ? (Array.isArray(pl.data.plan)
+                ? pl.data.plan.map((s: any) => typeof s === 'string' ? s
+                    : [s.action, s.qty, s.source ?? s.symbol, '(' + rup(s.value) + ')']
+                        .filter(Boolean).join(' ')).join(' → ')
+                : JSON.stringify(pl.data).slice(0, 220))
             : (pl.data.error || 'preview failed')}
         </p>
       ))}
-      {msg && <p className={styles.note}>{msg}</p>}
-      {oa && oa.flows.length > 0 && (
-        <p className={styles.note}>
-          Open Alpha flows: {oa.flows.slice(-5).map((f) => `${f.kind} ₹${Math.round(f.amount).toLocaleString('en-IN')} (${f.ts.slice(0, 10)})`).join(' · ')}
+      {msg && <p className={styles.note}><b>{msg}</b></p>}
+      {Object.entries(books).filter(([, b]) => (b.flows ?? []).length).map(([k, b]) => (
+        <p key={k} className={styles.note}>
+          {b.name} flows: {(b.flows ?? []).slice(-4).map((f) =>
+            f.kind + ' ' + rup(f.amount) + ' (' + String(f.ts).slice(0, 10) + ')').join(' · ')}
         </p>
-      )}
+      ))}
       <p className={styles.note}>
-        Same preview → confirm → execute contract as True North's own cash panel. Open Alpha deposits
-        sweep to CASHIETF and fund the next signals; real-money Open Alpha arrives after the Dec-5 soak review.
+        Preview → confirm → execute, the same contract True North's own cash panel uses. Each leg
+        runs that book's hardened flow: positions are never force-sold, and a withdrawal that
+        cannot be funded is refused rather than partially filled.
       </p>
     </div>
   );
@@ -355,7 +474,7 @@ function DividendsCard() {
           {showSim && (
             <div style={{ marginTop: 10 }}>
               <div style={{ overflowX: 'auto' }}>
-                <table className={styles.table}
+                <table className={styles.tbl}
                        style={{ fontSize: 12.5, fontVariantNumeric: 'tabular-nums', width: 'auto' }}>
                   <thead>
                     <tr>
@@ -433,7 +552,7 @@ function DividendsCard() {
   );
 }
 
-export default function Sleeves() {
+export default function CapitalDesk() {
   const [mom, setMom] = useState<MomState | null>(null);
   const [bs, setBs] = useState<BsFeed | null>(null);
   const [tn, setTn] = useState<TnBench | null>(null);
@@ -518,11 +637,12 @@ export default function Sleeves() {
     <div className={styles.page}>
       <div className={styles.head}>
         <div>
-          <h1>Sleeves — True North × Open Alpha</h1>
+          <h1>Capital Desk</h1>
           <div className={styles.sub}>
-            One portfolio, two sleeves, 50-50 monthly rebalanced · {win} overlapping trading days
+            Every rupee in and out, and the target it is working toward · {win} overlapping
+            trading days
             {bs && bs.n_live_trades === 0
-              ? ' — True North LIVE against Open Alpha BACKFILL (Open Alpha has no live trades yet)'
+              ? ' — True North LIVE against the Open Alpha reference model'
               : ' of common live history'}
           </div>
         </div>
@@ -625,6 +745,7 @@ export default function Sleeves() {
         </div>
       )}
 
+      <AllocationDesk />
       <FundsPanel />
       <DividendsCard />
     </div>

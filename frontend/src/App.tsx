@@ -37,7 +37,7 @@ import Straddle45 from './pages/Straddle45';
 import StockWings from './pages/StockWings';
 import BreakoutPaper from './pages/BreakoutPaper';
 import BlueskyPaper from './pages/BlueskyPaper';
-import Sleeves from './pages/Sleeves';
+import CapitalDesk from './pages/CapitalDesk';
 import HaPaper from './pages/HaPaper';
 import OrbPaper from './pages/OrbPaper';
 import OholPaper from './pages/OholPaper';
@@ -345,15 +345,18 @@ export default function App() {
         }
       />
       <Route
-        path="/sleeves"
+        path="/capital"
         element={
           <Protected>
-            <AppLayout active="bluesky-paper">
-              <Sleeves />
+            <AppLayout active="capital">
+              <CapitalDesk />
             </AppLayout>
           </Protected>
         }
       />
+      {/* The page was called "Sleeves 50-50" until 05-Sep-2026. Any bookmark or link
+          that still says /sleeves lands on the Capital Desk rather than a 404. */}
+      <Route path="/sleeves" element={<Navigate to="/capital" replace />} />
       <Route
         path="/ha-paper"
         element={

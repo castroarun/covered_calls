@@ -397,6 +397,50 @@ def _route(amount):
     return dict(amount=round(amount, 2), legs=legs, notes=notes, drift_before=_drift())
 
 
+def _ipo_flow(kind):
+    """IPO is a PAPER sleeve, so its share of a deposit is earmarked, not deployed.
+
+    The money physically stays in the liquid ETF; `ipo_funded` records how much of it is
+    spoken for, so the drift table tells the truth about the target while the sleeve is
+    still on soak. When IPO graduates to real money this endpoint is replaced by a real
+    book adapter and the earmark becomes its opening capital.
+    """
+    amt, dry = _params()
+    if amt is None:
+        return jsonify(error='amount must be a number between 1 and 1,00,00,000'), 400
+    a = _alloc()
+    cur = float(a.get('ipo_funded', 0.0) or 0.0)
+    after = cur + amt if kind == 'deposit' else cur - amt
+    if after < -1:
+        return jsonify(ok=False, book='ipo', kind=kind, amount=amt, feasible=False,
+                       plan=[f'only Rs {cur:,.0f} is earmarked for IPO']), 409
+    plan = ([f'earmark Rs {amt:,.0f} for the IPO sleeve (held in the liquid ETF)',
+             'no order is placed — IPO is on paper until the soak review clears it']
+            if kind == 'deposit' else
+            [f'release Rs {amt:,.0f} of the IPO earmark back to free capital'])
+    out = dict(ok=True, book='ipo', kind=kind, amount=amt, dry_run=dry, feasible=True,
+               plan=plan, earmark_after=round(max(0.0, after), 2))
+    if dry:
+        return jsonify(out)
+    a['ipo_funded'] = round(max(0.0, after), 2)
+    a.setdefault('flows', []).append(dict(ts=str(datetime.now())[:19], kind=kind,
+                                          amount=amt, via='capital desk'))
+    tmp = ALLOC.with_suffix('.json.tmp')
+    json.dump(a, open(tmp, 'w'), indent=1)
+    os.replace(tmp, ALLOC)
+    return jsonify(out)
+
+
+@sleeves_bp.route('/api/sleeves/ipo/deposit', methods=['POST'])
+def ipo_deposit():
+    return _ipo_flow('deposit')
+
+
+@sleeves_bp.route('/api/sleeves/ipo/withdraw', methods=['POST'])
+def ipo_withdraw():
+    return _ipo_flow('withdraw')
+
+
 @sleeves_bp.route('/api/sleeves/allocation')
 def sleeves_allocation():
     return jsonify(_drift())
