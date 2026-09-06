@@ -2,6 +2,26 @@
 
 Cross-session source of truth for pending work. Each item: what / why / when.
 
+## ✅ 2026-09-06 — DECIDED: no gold sleeve for now (Arun)
+
+The book stands at **True North 40 / Open Alpha 40 / IPO Base 20**, and gold is not in it.
+
+This closes the adoption call left open by research/147 and re-raised by research/154, whose
+constrained frontier wanted OA 40 / TN 25 / IPO 20 / GOLD 15. It is a decision, not a
+refutation: gold's numbers stand (it lifts blend Calmar at ~zero correlation, and it earns in
+the 2018 and 2022H1 grinds *and* in the 2020 crash). Arun has chosen not to add a fourth
+sleeve while the third has never traded.
+
+**What this parks, and what it does not:**
+- The **four-sleeve study** (TN/OA/GOLD/MYB, Ops review 2026-11-30) keeps its gold-only null —
+  that null is what makes the study honest, so it stays regardless of whether gold is held.
+- research/154's **crash-tail retraction stands on its own** and is unaffected: the deployed
+  pair's worst 20-year drawdown IS 2008 at −16.5% monthly / −17.15% daily. The re-audit of
+  per-window drawdowns in r/146–r/153 is still owed.
+- Revisit gold if the IPO sleeve clears its soak and the book still wants drawdown cover, or
+  if a crash-alpha candidate re-opened by the retraction changes the picture.
+
+
 ## ✅ 2026-09-05 — research/153 IPO Base breakout: STRATEGY CANDIDATE — the first third sleeve to clear every leg of the bar
 
 Full verdict: `research/153_ipo_base/results/RESULTS.md` · study page
